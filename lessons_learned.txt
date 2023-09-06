@@ -1,0 +1,2203 @@
+
+Tech that we will be using to build this project:
+python
+docker
+kubernetes
+mongodb
+RabbitMQ
+
+What we are trying to achieve?
+
+User Request                           -->1. Use authentication service to authenticate                                
+--> API Gateway -->3. Puts a message in RabbitMQ --> letting downstream services to  know that there is a video to be processed in mongoDB
+                                       -->2. Stores the video in Mongo --> converter consumes messages from queue and also fetch the id of video from it (convert it) --> puts the message on queue --> notification service --> emails user--> user gives id and JWT to API (requests audio)--> API gateway fetch the audio from mongodb and servers the user.
+
+
+
+
+
+
+Installations:
+1. docker           https://docs.docker.com/get-docker/
+2. kubectl          https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+3. k9s              https://github.com/derailed/k9s
+4. mysql            Can install using package manager like: brew install mysql  or choco install mysql           for production use best security practices while installing
+5. python           https://www.python.org/downloads/
+6. minikube         https://minikube.sigs.k8s.io/docs/start/
+
+
+
+directory structure : microservicesk8s\python\src\
+now code for different microservices inside src directory under different directories.
+
+
+                                                                                             Auth service
+_______________________________________________________________________________________________________________________________________________________________________________________________________________________
+1. microservicesk8s\python\src\
+
+
+mkdir auth 
+cd auth
+
+
+
+python3 -m venv venv              | create virtual env
+
+It is a common practice to use virtual environments to create isolated Python environments for projects, allowing you to manage project-specific dependencies and avoid conflicts with other Python installations.
+
+To activate the virtual environment, you can use the following command:
+
+On Linux/Mac: source venv/bin/activate
+On Windows: .\venv\Scripts\activate.bat
+
+source venv/bin/activate           | activate the virtual env
+
+pip install pylint                 | Pylint is a widely used tool for analyzing Python code and identifying potential issues, enforcing coding standards, and providing suggestions for improvement.
+
+pip install jedi                  | It's designed to enhance the development experience by providing intelligent code completion, offering insights into the structure and properties of Python code, and suggesting improvements. 
+
+pip install pyjwt
+pip install flask
+pip install flask_mysqldb
+
+
+5.server.py for authentication service
+_______________________________________
+vi server.py
+
+# Import necessary libraries
+import jwt  # Import JWT (JSON Web Token), it is used for securely transmitting information between parties as a compact, self-contained, and digitally signed token.
+import datetime  # Import datetime library for handling dates and times
+import os  # Import os library for interacting with the operating system
+from flask import Flask, request  # Import Flask framework for building web applications
+from flask_mysqldb import MySQL  # Import MySQL extension for Flask to work with MySQL databases
+
+# Create a Flask web application instance              This basically configure our servers so that requests to different routes can interface with our code.
+server = Flask(__name__)                        
+
+# Connect Flask application to MySQL database
+mysql = MySQL(server)
+
+# Configure the MySQL database connection settings using environment variables(these are set in secret and configmap resources)
+# This is where the database connection details are stored securely
+server.config["MYSQL_HOST"] = os.environ.get("MYSQL_HOST")  # Database host address
+server.config["MYSQL_USER"] = os.environ.get("MYSQL_USER")  # Database username
+server.config["MYSQL_PASSWORD"] = os.environ.get("MYSQL_PASSWORD")  # Database password
+server.config["MYSQL_DB"] = os.environ.get("MYSQL_DB")  # Database name
+server.config["MYSQL_PORT"] = os.environ.get("MYSQL_PORT")  # Database port number
+
+# Define a route for the "/login" URL using HTTP POST method
+
+@server.route("/login", methods=["POST"])
+def login():
+    auth = request.authorization  # Retrieve credentials from the request(imported in begining)      -->from Basic Authentication header
+
+    # Check if credentials are missing
+    if not auth:
+        return "Missing credentials", 401  # Return an error response with status code 401
+    
+    
+    #check db for username and password
+
+
+__________________________________________________________________________ 
+
+testing by setting MYSQL_HOST=localhost
+
+using env variables to set mysql database connection configuration
+terminal: export MYSQL_HOST=localhost
+
+
+(venv) root@PC-f7ad11:/mnt/c/Users/LENOVO/microservicesk8s/python/src/auth# python3 server.py
+localhost
+
+
+__________________________________________________________________________
+
+
+
+6.vi init.sql  Creating a database so as to check username and password for user trying to login 
+
+
+-- Create a new user 'auth_user' who can access the database only from 'localhost' and set their password
+CREATE USER 'auth_user'@'localhost' IDENTIFIED BY 'Aauth123';                                    ------------------> this is for querying the database not the username and password which are saved inside database.
+
+-- Create a new database named 'auth'
+CREATE DATABASE auth;
+
+-- Grant all privileges on the 'auth' database to the user 'auth_user' only from 'localhost'
+GRANT ALL PRIVILEGES ON auth.* TO 'auth_user'@'localhost';
+
+-- Switch to using the 'auth' database for subsequent operations
+USE auth;
+
+-- Create a new table named 'user' with columns: 'id', 'email', and 'password'
+CREATE TABLE user (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, -- Create an auto-incrementing unique identifier
+    email VARCHAR(255) NOT NULL, -- Column to store email addresses (limited to 255 characters), cannot be empty
+    password VARCHAR(255) NOT NULL -- Column to store passwords (limited to 255 characters), cannot be empty
+);
+
+-- Insert a new record into the 'user' table with specified email and password values
+INSERT INTO user (email, password) VALUES ('bhanumcorrect@gmail.com', 'interview');            ---------------------> this is the user that goes into our database and gets verified to get access to our api gateway
+
+
+_________________________________________________________________________ 
+
+
+7. I had populated the mysql once with incorrect email, when retried got an error:
+
+PS C:\Users\LENOVO\microservicesk8s> Get-Content .\init.sql | mysql -uroot                           (in linux, we can use mysql -uroot < init.sql )
+ERROR 1064 (42000) at line 1: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'CREATE DATABASE auth' at line 3
+
+Deleted the database and user 
+
+mysql -uroot -e "DROP DATABASE auth" 
+and also the user: mysql -uroot -e "DROP USER auth_user@localhost"
+
+
+PS C:\Users\LENOVO\microservicesk8s> mysql -uroot
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 8
+Server version: 8.0.31 MySQL Community Server - GPL
+
+Copyright (c) 2000, 2022, Oracle and/or its affiliates.
+
+Oracle is a registered trademark of Oracle Corporation and/or its
+affiliates. Other names may be trademarks of their respective
+owners.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+mysql> show databases;                                                                   show databases; to check the list of databases present in mysql
++--------------------+                                                                   
+| Database           |
++--------------------+
+| information_schema |
+| mysql              |
+| performance_schema |
+| sys                |
++--------------------+
+4 rows in set (0.06 sec)
+
+mysql> mysql -uroot < init.sql
+
+
+So, when you run this command, it will connect to the MySQL server as the root user and execute the SQL statements present in the init.sql file. 
+This is commonly used to initialize or set up a database with the required schema, tables, and data. 
+Make sure you are in the appropriate directory where the init.sql file is located before running the command. 
+Also, be cautious when using the root user for regular tasks, as it has elevated privileges.
+
+
+                                                                                                    
+mysql> show databases;
++--------------------+
+| Database           |
++--------------------+
+| auth               |
+| information_schema |
+| mysql              |
+| performance_schema |
+| sys                |
++--------------------+
+5 rows in set (0.00 sec)
+
+PS C:\Users\LENOVO\microservicesk8s\python\src\auth> mysql -uroot
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 28
+Server version: 8.0.31 MySQL Community Server - GPL
+
+Copyright (c) 2000, 2022, Oracle and/or its affiliates.
+
+Oracle is a registered trademark of Oracle Corporation and/or its
+affiliates. Other names may be trademarks of their respective
+owners.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+mysql> show databases;
++--------------------+
+| Database           |
++--------------------+
+| auth               |
+| information_schema |
+| mysql              |
+| performance_schema |
+| sys                |
++--------------------+
+5 rows in set (0.00 sec)
+
+mysql> show tables;                                                                                
+ERROR 1046 (3D000): No database selected
+mysql> use auth;                                                                                    use database_name;  for selecting a database
+Database changed
+mysql> show tables;                                                                                 show tables; for getting the list of tables in the selected database
++----------------+
+| Tables_in_auth |
++----------------+
+| user           |
++----------------+
+1 row in set (0.02 sec)
+
+mysql> describe user;
++----------+--------------+------+-----+---------+----------------+
+| Field    | Type         | Null | Key | Default | Extra          |
++----------+--------------+------+-----+---------+----------------+
+| id       | int          | NO   | PRI | NULL    | auto_increment |
+| email    | varchar(255) | NO   |     | NULL    |                |
+| password | varchar(255) | NO   |     | NULL    |                |
++----------+--------------+------+-----+---------+----------------+
+3 rows in set (0.02 sec)
+
+mysql> select * user;
+ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'user' at line 1        
+mysql> select * from user; 
++----+-------------------------+-----------+
+| id | email                   | password  |
++----+-------------------------+-----------+
+|  1 | bhanumcorrect@gmail.com | interview |                                    --------------------> username and password that we had given in our init.sql 
++----+-------------------------+-----------+
+1 row in set (0.00 sec)
+
+_______________________________________________________________________________
+
+
+
+
+  
+ email VARCHAR(255) NOT NULL UNIQUE,                           update init.sql  -------------> add unique for username as we can't have multiple usernames with the same password attached to them
+
+mysql -uroot -e "DROP DATABASE auth"
+mysql -uroot -e "DROP USER auth_user@localhost"
+
+
++----------+--------------+------+-----+---------+----------------+
+| Field    | Type         | Null | Key | Default | Extra          |
++----------+--------------+------+-----+---------+----------------+
+| id       | int          | NO   | PRI | NULL    | auto_increment |
+| email    | varchar(255) | NO   | UNI | NULL    |                |      ----> unique added
+| password | varchar(255) | NO   |     | NULL    |                |
++----------+--------------+------+-----+---------+----------------+
+
+_______________________________________________________________________
+
+8.
+
+Now we will be adding code for checking the db for username and password: we will do this by using flask_mysql db 
+
+that will use all the config we added as environment variables such as to host = localhost, port = 3306 so as to connect to database.
+
+A cursor is an object that enables you to interact with the database and retrieve, manipulate, and process data from the result sets of SQL queries. 
+A cursor acts as a pointer or iterator that allows you to navigate through the rows of a query result, one row at a time.
+
+
+
+
+   cur = mysql.connection.cursor()
+
+# Execute a SQL query to retrieve email and password from the 'user' table based on the provided username
+    res = cur.execute(
+          "SELECT email, password FROM user WHERE email=%s", (auth.username,)         --------- here auth.username is coming from what is passed in your request authentication header (we defined this under login route)
+    )
+
+# Check if the query result contains any rows
+    if res > 0:
+    # Fetch the first row from the query result
+        user_row = cur.fetchone()
+
+    # Extract the email and password from the fetched row
+        email = user_row[0]
+        password = user_row[1]
+
+    # Compare the provided username and password with the retrieved ones
+
+        if auth.username != email or auth.password != password:
+
+        # Return an error message and HTTP status code 401 (Unauthorized)
+
+             return "invalid credentials", 401
+        else:
+        # If credentials are valid, create a JSON Web Token (JWT) using the provided username and JWT secret
+
+             return createJWT(auth.username, os.environ.get("JWT_SECRET"), JWT)
+    else:
+
+    # If no matching rows were found, return an error message and HTTP status code 401 (Unauthorized)
+        return "invalid credentials", 401
+
+__________________________________________________________________________________
+
+Now in the last part we understood if creds passed match with the creds in mysql, we have to create a JWT
+
+Jason Web Tokens
+
+Understanding the reason of using it:
+
+Our microservices are going to be running in a k8s cluster and that cluster is not going to be accessible to or from the outside internet.
+Our client is going to be making request from outside the cluster with the intention of making use of our distributed system deployed within our pvt k8s cluster via our system's gateway.
+Our gateway service is going to be the entrypoint to the overall application 
+
+The gateway receives request from the client and also communicates with a necessary internal service to complete the request that came from the client.
+
+for example for uploading a file we need to create a upload endpoint in our file that makes all internal services to work so that it can be processed
+
+so if our internal services live in a private network how do we determine when should we allow request from internet??
+
+This is where auth service comes in!
+
+requester's creds are saved in authdb
+
+when their username,password matched with our mysql db
+
+we give them access!
+
+
+
+What is Basic authentication?
+This scheme requires the client to provide a username and password in a request which should be contained in a header field
+of the form 
+Authorization: Basic <credentials>
+where credentials = base64(username:password)
+
+we take these and compare it with our mysqldb
+
+If we find a match we return JWT
+which client will use for subsequent request to our gateway upload and download endpoints
+
+
+JWT looks like:
+
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.
+eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.
+SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+
+3 parts seperated by a .   <----fullstop
+
+Header: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 is the base64Url-encoded header. This header specifies that the token is signed using the HMAC SHA256 algorithm (HS256) and that it's a JWT (JWT).
+Payload: eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ is the base64Url-encoded payload. This payload contains claims about the user, such as the subject (sub), name (name), and issued at time (iat).
+Signature: SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c is the signature. It's generated by hashing the encoded header and payload along with a secret key using the HMAC SHA256 algorithm.
+
+
+Base64 encoding converts the binary data into text format, which is passed through communication channel where a user can handle text safely. 
+Base64 is also called as Privacy enhanced Electronic mail (PEM) and is primarily used in email encryption process.
+
+Two json formatted strings and a signature 
+What are these 3 parts?
+
+
+
+1. header 
+contains a key value pair for signing algorithm(algorithm which was used to sign the token which will allow us to verify later that the sender of the token is who it said it is and to ensure that the message was not changed along the way and the type of token which is JWT
+
+asymmitric and           |    symmetric signing algorithms
+both pub & pvt keys      |     one pvt key
+
+ours will use symmetric algo : HS256
+
+Once token is signed by this key and then sent to user and user makes request back it will send its JWT in request and our auth service can validate using single private key if 
+the token has been tampered or signed with diff key our auth service will know it is invalid.
+
+Its imp that we know that json formatted data in  our token is invalid cause that data is going to contain the access permissions for the user
+
+2. payload
+
+claims under payload are pieces of info about the user mostly defined by us, there are predefined claims as well
+
+
+3. signature 
+HMACSHA256(
+ base64UrlEncode(header)
+base64UrlEncode(payload)
+our pvt key 
+)
+and signing them with our symmetric algorithm
+
+from claims we can check the access level of the client
+
+for this project we will allow all the endpoints to our client if his payload section contains "admin": true
+
+
+_____________Function to create the json webtoken__________________________________________________________________________________________________
+
+# Define a function named createJWT that takes three parameters: username, secret, and authz.
+
+def createJWT(username, secret, authz):
+
+    # Inside the function, create a JSON Web Token (JWT) by using the jwt.encode function.
+
+    return jwt.encode(
+
+    # Create the content (payload) of the JWT as a dictionary.
+
+    {
+        # Include a "user" key in the payload and assign it the value of the 'username' parameter.
+
+        "user": username,
+
+        # Include an "exp" (expiration) key in the payload and set it to the current date and time,
+
+        # increased by one day. This is when the JWT will expire.
+
+        "exp": datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(days=1),
+
+        # Include an "iat" (issued at) key in the payload and set it to the current date and time in UTC.
+        # This is when the JWT is issued.
+        "iat": datetime.datetime.utcnow(),
+
+        # Include an "admin" key in the payload and assign it the value of the 'authz' parameter.
+        "admin": authz                                                                                          ---------------> when creating the token this will determine wether user have access to endpoint or not
+    },
+
+    # Pass the payload as the first argument to jwt.encode.
+
+    # Pass the 'secret' parameter as the second argument to jwt.encode.
+    
+    secret,
+
+    # Specify the hashing algorithm 'HS256' for encoding the JWT.
+
+    # End of the jwt.encode function.
+    algorithm='HS256',
+    )
+
+# End of the createJWT function.
+
+___________________________________________________________________________________________________________
+
+   # Compare the provided username and password with the retrieved ones
+        if auth.username != email or auth.password != password:
+        # Return an error message and HTTP status code 401 (Unauthorized)
+             return "invalid credentials", 401
+        else:
+        # If credentials are valid, create a JSON Web Token (JWT) using the provided username and JWT secret
+             return createJWT(auth.username, os.environ.get("JWT_SECRET"), True)                               ----------> here is the secret which is also used to validate the jwt
+    else:
+    # If no matching rows were found, return an error message and HTTP status code 401 (Unauthorized)
+        return "invalid credentials", 401
+
+___________________________________________________________________________________________________________
+
+Understanding how traffic will connect to our application running inside docker container.
+https://flask.palletsprojects.com/en/1.1.x/quickstart/#a-minimal-application 
+
+
+if __name__ == "__main__":
+    server.run(host="0.0.0.0", port=5000)    
+
+
+    # Specify the hashing algorithm 'HS256' for encoding the JWT.
+
+    # End of the jwt.encode function.
+    algorithm='HS256',
+    )
+# End of the createJWT function.
+
+if __name__ == "__main__":
+    server.run(host="0.0.0.0", port=5000)                           <----------------------   What is this in the end of the code of server.py ?? Let's understand
+
+
+
+In Python, the if __name__ == "__main__": construct is commonly used to determine whether a Python script is being run directly or imported as a module into another script. 
+Code inside this block is executed only if the script is the main program, allowing you to organize your code and control its execution.
+
+
+# The "__name__" special variable is a built-in Python variable that holds the name of the current module or script.
+# The double underscores before and after "name" are a Python convention for special variables.
+
+
+if __name__ == "__main__":
+    server.run(host="0.0.0.0", port=5000)
+
+    # You can think of this as the "entry point" for your script.
+    # Here, it's using the Flask framework's "server.run" method to start a web server.
+    # The server is configured to listen on all available network interfaces ("0.0.0.0")
+    # and port 5000
+    server.run(host="0.0.0.0", port=5000)
+    # This line starts the Flask web server when the script is executed directly.
+
+      explains host=5000 and more
+
+
+because we want our application to have requests from any ip if not given it will be only available from our localhost
+
+our application will be running inside docker container, container have its own ip which is in its own docker network
+
+Requests are sent on containers ip
+
+But this is not enough for our flask application to receive those requests
+
+We need to tell our flask app to listen on our containers ip
+
+This is where host config comes in
+
+Host is the server that is hosting our application in our case it is docker container so we need to tell our flask to listen on docker container ip but 
+our docker contianer ip address is subject to change so instead of setting it to static ip of docker container we set it to 0.0.0.0 
+
+It is wild  card which tells flask app to listen on any and all of our container's ip addresses it can find
+if we dont configure this it will default to localhost which is loopback address
+and localhost is only accessible from within the host therefore outside request sent to our docker container will neverfrom outside world will never make it to our flask app 
+because loopback address is not publically accessible so wehen we set host to 0.0.0.0 we are telling our app to listen on all of our docker container ips including loop back address our local host
+and any other ipaddress available on our docker container 
+
+
+for example if we connect our docker container to 2 seperate docker networks
+
+docker will assign a diff ipaddress to our container for each docker network that means that with 0.0.0.0 host config our flask app will listen to requests coming to both of the ip address assigned to the container, its also possible to set the host config to a specific ipaddress
+_____________________________________________________________________________________________________________________
+
+
+
+
+
+create route to validate JWT's      https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication (for understanding different schemes like basic auth, bearer etc)
+______________________________
+and this route is going to used by our api gateway to validate JWT's to sync with  request from the client to both upload and recieve or download mp3s
+
+
+@server.route("/validate", method=["POST"])
+def validate():
+    encoded_jwt = request.header["Authorization"]
+
+    if not encoded_jwt:
+        return "missing credentials", 401
+
+
+
+If you remember from our basic authorization scheme 
+For that scheme we need to have word basic in our authorization header that contain our base64(username:password)
+Authorization: Basic base64(username:password)
+
+for our JWT we instead need to have word bearer in our header!
+
+Authorization: Bearer<token>
+   
+format for authorization header 
+
+Authorization: <type> <credentials> 
+
+type represents authentication scheme and creds represents creds for that particular type
+
+if type is basic we know base64 encoded creds
+if type is bearer we know that party isin possesion of the token has access to the token associated resources
+
+Now in the code for our validation endpoint to save some time we are going to assume the authorization header contains a bearer token 
+therefore we are not going to validate or check the word that represents the  type that comes before the credentials in the header
+in actual prod env you should spend time to check the extra time to check the type or the authentication scheme presents within the authorization header
+  
+
+
+
+code in server.py for validating
+__________________________________
+
+# It specifies that this route will handle HTTP POST requests at the "/validate" URL.
+
+@server.route("/validate", method=["POST"])
+def validate():
+
+    # Extract the JWT (JSON Web Token) from the "Authorization" header of the HTTP request.
+
+    encoded_jwt = request.headers["Authorization"]
+
+    # Check if the JWT is missing in the request headers.
+    if not encoded_jwt:
+        # If the JWT is missing, return an error response with a status code 401 (Unauthorized).
+        return "missing credentials", 401
+
+    # Split the JWT string to extract the actual token part (the part after "Bearer ").
+    encoded_jwt = encoded_jwt.split(" ")[1]
+
+    # Try to decode the JWT using a secret key specified in an environment variable.
+    try:
+        decoded = jwt.decode(
+            encoded_jwt, os.environ.get("JWT_SECRET"), algorithm=["HS256"]
+        )
+    except:
+        # If decoding fails, return an error response with a status code 403 (Forbidden).
+        return "not authorized", 403
+
+    # If the JWT is successfully decoded, return the decoded contents as a response with a status code 200 (OK).
+    return decoded, 200
+
+
+_____________________________________________________________________________________________________________________done with auth service code
+
+Now Dockerfile for authentication service
+
+FROM python:3.10-slim-bullseye
+
+# Install system dependencies
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends --no-install-suggests \
+  build-essential default-libmysqlclient-dev pkg-config \
+  && pip install --no-cache-dir --upgrade pip
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the requirements file and install dependencies
+COPY ./requirements.txt /app/                                        ----> cp this before copying the whole code makes sense as any change in source code shouldn't make us downloaded dependencies again for no reason.(Only built again if change in dependencies)
+RUN pip install --no-cache-dir --requirement /app/requirements.txt
+
+# Copy the rest of your application code
+COPY . /app/
+
+EXPOSE 5000                                        -------------> this is just for the sake of documentation, for selecting the port we use -p flag in command
+
+# Define the command to run your application
+CMD ["python3", "server.py"]
+
+
+docker login
+
+docker build -t bhanumalhotra/auth1:latest .
+
+docker push bhanumalhotra/auth1:latest         (you don't need to specially go to dockerhub and create repository, once login you can directly push)
+ 
+
+Build speed is important to consider!
+
+Each layer in dockerfile is built on top of the previous one and docker uses cache layers if nothing is changed in the layer. But it builds each layer after the layer with a change.
+____________________________________________________________________________________________________________________
+Kubernetes manifests 
+
+https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+
+mkdir manifests
+cd manifests and create the following files
+
+auth-deploy.yml
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  labels:
+    app: auth
+spec:
+  replicas: 2
+  selector: 
+    matchLabels:
+      app: auth
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 3
+  template: 
+    metadata:
+      labels:
+        app: auth
+    spec:
+      containers:
+        - name: auth
+          image: bhanumalhotra/auth1
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: auth-configmap    these will be picked by the shell and populated as environment variables
+            - secretRef:
+                name: auth-secret
+
+
+Rolling Update Deployment
+The Deployment updates Pods in a rolling update fashion when .spec.strategy.type==RollingUpdate. You can specify maxUnavailable and maxSurge to control the rolling update process.
+________________________________________________________________________________________________________
+configmap.yml
+
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-configmap
+data: 
+  MYSQL_HOST: host.minikube.internal  -----------------> these will be picked by the shell as env variables. these are for connecting the auth service to mysql db which contains user and password and is running on our localhost 
+  MYSQL_USER: auth_user
+  MYSQL_DB: auth
+  MYSQL_PORT: "3306"
+
+The host.minikube.internal domain is a special DNS name that resolves to the host machine's IP address from within a Minikube cluster. 
+It is commonly used when you want to access services running on your host machine from within a Minikube cluster.
+as our sql is running on our local system!
+________________________________________________________________________________________________________
+secret.yml
+
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: auth-secret
+stringData:
+  MYSQL_PASSWORD: Auth123   #should not be shared on git in general
+  JWT_SECRET: interview     #should not be shared on git in general
+type: Opaque
+
+
+
+these are set as env variables as it is given in pod config.
+You can also set them as mounts, example:
+spec:
+  containers:
+  - name: my-container
+    image: my-image
+    volumeMounts:
+    - name: secret-volume
+      mountPath: /etc/my-secrets
+  volumes:
+  - name: secret-volume
+    secret:
+      secretName: my-secret
+_______________________________________________________________________________________________________
+
+apiVersion: v1
+kind: Service
+metadata:
+  name:
+spec:
+  selector:
+    app: auth
+    type: ClusterIP                -------> for internal communication in cluster
+    ports: 
+      - port: 5000
+        targetPort: 5000
+        protocol: TCP
+
+______________________________________________________________________________________________________
+
+minikube delete (if in case it is giving errors)
+
+minikube start
+
+_____________
+
+(venv) PS C:\Users\LENOVO\microservicesk8s\python\src\auth\manifests> kubectl apply -f ./
+
+deployment.apps/auth unchanged
+configmap/auth-configmap unchanged
+secret/auth-secret configured
+service/auth created
+
+
+
+kuberenetes is smart, it will throw the errors in configurations once you try applying them.
+
+after applying the files
+
+
+
+Crashbackloopoff     (common error)
+
+error was related to how routes are defined in the app, we need to use methods and not method.
+    return f(self, *args, **kwargs)       ││   File "/usr/local/lib/python3.10/site-packages/flask/app.py", line 1052, in add_url_ ││     rule = self.url_rule_class(rule, methods=methods, **options)  ││ TypeError: Rule.__init__() got an unexpected keyword argument 'method'   
+
+resolved
+
+______________________________________________
+Inside the container using k9s
+
+
+<<K9s-Shell>> Pod: default/auth-5c9cb5887-5xbm2 | Container: auth 
+root@auth-5c9cb5887-5xbm2:/app# printenc
+bash: printenc: command not found
+root@auth-5c9cb5887-5xbm2:/app# printenv
+KUBERNETES_SERVICE_PORT_HTTPS=443
+MYSQL_PORT=3306
+KUBERNETES_SERVICE_PORT=443
+HOSTNAME=auth-5c9cb5887-5xbm2
+PYTHON_VERSION=3.10.13
+AUTH_PORT_5000_TCP_PORT=5000
+AUTH_PORT_5000_TCP=tcp://10.106.214.73:5000
+MYSQL_DB=auth
+AUTH_SERVICE_PORT=5000
+PWD=/app
+PYTHON_SETUPTOOLS_VERSION=65.5.1
+MYSQL_PASSWORD=Auth123
+MYSQL_USER=auth_user
+HOME=/root
+LANG=C.UTF-8
+KUBERNETES_PORT_443_TCP=tcp://10.96.0.1:443
+GPG_KEY=A035C8C19219BA821ECEA86B64E628F8D684696D
+AUTH_SERVICE_HOST=10.106.214.73
+AUTH_PORT_5000_TCP_PROTO=tcp
+MYSQL_HOST=host.minikube.internal
+AUTH_PORT_5000_TCP_ADDR=10.106.214.73
+TERM=xterm
+SHLVL=1
+KUBERNETES_PORT_443_TCP_PROTO=tcp
+PYTHON_PIP_VERSION=23.0.1
+KUBERNETES_PORT_443_TCP_ADDR=10.96.0.1
+AUTH_PORT=tcp://10.106.214.73:5000
+PYTHON_GET_PIP_SHA256=45a2bb8bf2bb5eff16fdd00faef6f29731831c7c59bd9fc2bf1f3bed511ff1fe   
+KUBERNETES_SERVICE_HOST=10.96.0.1
+KUBERNETES_PORT=tcp://10.96.0.1:443
+KUBERNETES_PORT_443_TCP_PORT=443
+PYTHON_GET_PIP_URL=https://github.com/pypa/get-pip/raw/9af82b715db434abb94a0a6f3569f43e72157346/public/get-pip.py
+PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+JWT_SECRET=interview
+_=/usr/bin/printenv
+root@auth-5c9cb5887-5xbm2:/app#
+
+
+
+
+_______________________________________________________________________________________________________
+
+Understanding k8s
+
+docker start container, docker stop container, docker kill container, docker restart container etc    No need
+
+auto healing, auto scaling, single host problem are resolved by k8s
+
+A Kubernetes object is a "record of intent"--once you create the object, the Kubernetes system will constantly work to ensure that object exists. 
+By creating an object, you're effectively telling the Kubernetes system what you want your cluster's workload to look like; this is your cluster's desired state.
+say you need 4 contianer not 1 now, manually you will deploy 3 more containers and then attach them to the load balancer
+
+kubectl scale deployment --replicas=4 deployment_name
+
+The kubernetes control plane continually and actively manages every objects's actual state to match the desired state you supplied.
+
+To work with kuberenetes objects- wether to create, modify or delete them you'll need to use kubectl(kubernetes api)
+ 
+
+https://kubernetes.io/docs/reference/    ------------> great place to learn everything about k8s
+https://kubernetes.io/docs/concepts/overview/components/  ----------> architecture of k8s
+
+
+In the .yaml file for the Kubernetes object you want to create, you'll need to set values for the following fields:
+
+apiVersion - Which version of the Kubernetes API you're using to create this object
+kind - What kind of object you want to create
+metadata - Data that helps uniquely identify the object, including a name string, UID, and optional namespace
+spec - What state you desire for the object
+__________________________________________________________________________________________________________________________________________________________________________________________________________________
+                                                                                 GATEWAY: THE ENTRYPOINT 
+
+installations:
+
+ 100 cd gateway
+ 101 python -m venv venv
+ 102 .\venv\Scripts\Activate.ps1
+ 106 pip install jedi
+ 107 pip install pylint
+ 108 pip install pika
+ 109 pip install flask
+ 110 pip install pyMongo
+ 111 pip install Flask-PyMongo
+
+
+
+gridfs ?
+
+what is it?
+
+we are using mongodb to store our files mp3 and videos
+
+Limitsize on on document size of mongodb is 16mb
+
+for storing larger size of document mongoDB provides GridFS
+
+https://www.mongodb.com/docs/manual/core/gridfs/
+
+
+GridFS uses two collection to store files. One collection stores the file chunks (255kB), other stores file metadata
+
+When you request for data, driver reassembles the chunks
+
+
+______________________________________________________________________________________________
+
+server.py
+
+# Import necessary libraries/modules
+import os              # Import the operating system module for various system-related functions
+import gridfs          # Import the GridFS module for storing and retrieving large files in MongoDB
+import pika            # Import the Pika module for interacting with RabbitMQ, a message broker
+import json            # Import the JSON module for working with JSON data
+from flask import Flask, request  # Import the Flask web framework and request object
+
+# Import custom modules 
+from auth import validate       # Import a function called 'validate' from a module named 'auth'      ---------> we will create these custom modules soon
+from auth_svc import access     # Import a function called 'access' from a module named 'auth_svc'
+from storage import util       # Import a module named 'util' from a package named 'storage'
+
+# Create a Flask web application instance
+server = Flask(__name__)
+
+# Configure the MongoDB URI (Uniform Resource Identifier) for the server's MongoDB connection
+server.config["MONGO_URI"] = "mongodb://host.minikube.internal:27017/videos"         ---------------------------> host.minikube.internal takes us to localhost
+
+# Create a connection to the MongoDB database using Flask-PyMongo extension
+mongo = PyMongo(server)
+
+# Create a GridFS instance for working with files stored in MongoDB
+fs = gridfs.GridFS(mongo.db)
+
+# Create a connection to the RabbitMQ message broker
+connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
+
+# Create a communication channel for sending and receiving messages in RabbitMQ
+channel = connection.channel()
+
+# Define a route for handling HTTP POST requests to "/login"
+@server.route("/login", methods=["POST"])
+def login():
+    # Call the 'login' function from the 'access' module with the 'request' object and store the result in 'token' and 'err' ---------------------------> access.py is called which is a package we will be building in auth_svc directory
+    token, err = access.login(request)  # This line calls a function to handle user login and stores the result in 'token' and 'err'
+
+    if not err:
+        return token  # Return the 'token' as a response if there are no errors
+    else: 
+        return err  # Return the 'err' message as a response if there are errors
+
+@server.route("/upload", methods=["POST"])
+def upload():
+    access, err = validate.token(request)  # This line calls a function to validate a user token and stores the result in 'access' and 'err' ----------->validate.py is called and its response will be the payloads in json format, check the validate.yml response in the end.
+
+    access = json.loads(access)  #converts jason to python. Now this access will have payload which also have admin is set to true or false.
+
+    if access["admin"]:                                                                 ------------------------------> now from the payload we check if it contains admin or not, this says if admin claim resolves to true then we give the access. 
+        if len(request.files) > 1 or len(request.files) < 1:
+            return "exactly 1 file required", 400            #this request.file dictionary will have key for the file and file as a value.  _ is key and f is file
+            
+        for _, f in request.files.items():
+            err = util.upload(f, fs, channel, access) ------------------> we will create this util function futher(uploading the file to mongodb)
+
+            if err:
+                return err
+            
+            return "success!", 200
+        
+    else:
+        return "not authorized", 401
+
+@server.route("/download", methods=["GET"])
+def download():
+    pass                                                       -------------------------------------> passing the download function for now, will build it once we reach the stage of downloading the files
+
+if __name__ == "__main__":
+            server.run(host="0.0.0.0", port=8080)
+
+
+
+_____________________________________________________________________________
+
+
+
+mkdir auth_svc (under gateway)
+
+create __init__.py file which will mark this directory as package
+
+vim access.py ------------> module that contains our login function and calls authentication service for checking username and password in mysqldb
+
+
+# Import necessary libraries/modules
+import os           # Import the operating system module for various system-related functions
+import requests     # Import the 'requests' module for making HTTP requests to an internal authentication service
+
+# Define a function named 'login' that takes a 'request' object as an argument
+def login(request):
+    # Extract the 'authorization' header from the 'request' object
+    auth = request.authorization
+
+    # Check if the 'authorization' header is missing in the request
+    if not auth:
+        # If missing, return None and a tuple containing an error message and a 401 (Unauthorized) status code
+        return None, ("missing credentials", 401)
+    
+    # Extract the username and password from the 'authorization' header
+    basicAuth = (auth.username, auth.password)
+
+    # Create an HTTP POST request to the authentication service using the URL from the environment variable 'AUTH_SVC_ADDRESS'
+    response = requests.post(                                                                           --------------------------------> here we are making request to our auth service which we built first
+        f"http://{os.environ.get('AUTH_SVC_ADDRESS')}/login",
+        auth=basicAuth
+    )
+
+    # The 'response' object now contains the result of the HTTP POST request to the authentication service.
+    # You can check the response status code and content to determine if the authentication was successful or not.
+    if response.status_code == 200:
+        return response.txt, None
+    else:
+        return None, (response.txt, response.status_code)
+    
+
+_______________________________________________________________________________________________________________________________
+mkdir auth
+
+validate.py     ---------------> this validates the JWT 
+
+
+import os, requests  # Import necessary libraries/modules: 'os' for operating system functions and 'requests' for making HTTP requests
+
+def token(request):
+    # Check if the "Authorization" header is missing in the request
+    if not "Authorization" in request.headers:
+        return None, ("missing credentials", 401)  # Return a tuple with None (no token) and an error message with HTTP status code 401
+    
+    token = request.headers["Authorization"]  # Extract the token from the "Authorization" header of the request
+
+    # Check if the token is missing or empty
+    if not token:
+        return None, ("missing credentials", 401)  # Return a tuple with None (no token) and an error message with HTTP status code 401
+    
+    # Make an HTTP POST request to a validation service using the extracted token
+    response = requests.post(
+        f"http://{os.environ.get('AUTH_SVC_ADDRESS')}/validate",  # Construct the URL for the validation service using an environment variable   -----------> calling the auth service /validate endpoint and giving it the token to check its authenticity using the JWT_SECRET we had set
+        headers={"Authorization": token},  # Include the token in the request headers
+    )
+
+    # Check if the validation service responded with a 200 OK status code
+    if response.status_code == 200:
+        return response.txt, None  # Return the response text (the validated token) and no error       ------------------> gives us the payload which contains claims
+    
+    else:
+        # Return None (no token) and a tuple containing the response text and status code as an error
+        return None, (response.txt, response.status_code)                       
+
+       
+
+___________________________________________________________________________________________________________________________________   
+
+remember in authentication service your login endpoint it takes username, password and return a jw-token?
+
+
+now in payload of jwt
+
+you have username, expiration, admin 
+
+now if admin = true, we will allow acccess to all the endpoint
+
+
+payload is encoded
+
+
+we decode using JWT_SECRET
+and we get to know what all info is in payload including admin is set to true or false
+
+
+
+
+________________________________________________________________________________________________________________________________
+storage
+
+util.py
+
+# Import the necessary libraries for the code to work with RabbitMQ and JSON.
+import pika  # Python library for RabbitMQ communication
+import json  # Python library for JSON data handling
+
+# Define a function named 'upload' that takes four parameters:
+# - f: The file to be uploaded
+# - fs: A file storage object 
+# - channel: A communication channel to a message broker (RabbitMQ)
+# - access: A dictionary containing access information, including the username
+
+def upload(f, fs, channel, access):
+    try: 
+        # Try to upload the file 'f' to the file storage service 'fs' (mongob)
+        fid = fs.put(f)                                          ----------------> if successfull mongodb returns file id which we save as fid
+    except Exceptions as err: 
+        # If there is an exception (error) during the file upload, return an internal server error with a 500 status code
+        return "internal server error", 500
+    
+    # Create a message dictionary with important information:                      -------------------> if a file was uploaded successfully we want a message to be put up on the queue
+    message = {
+        "vide_fid": str(fid),        # The ID of the uploaded video file
+        "mp3_fid": None,            # Placeholder for the MP3 file ID (currently set to None)
+        "username": access["username"],  # The username associated with the access object
+    }
+   
+    try:
+        # Try to publish the 'message' to a RabbitMQ exchange
+        channel.basic_publish( 
+            exchange="",                  # The default exchange (a basic message routing mechanism)
+            routing_key="video",          # The routing key for the message (used for message routing)     -------->The DEFAULT EXCHANGE is a direct exchange with no name(empty string ) pre-declared by the broker. 
+                                                                                                                    It has one special property that makes it very useful for simple application: every queue that is created is automatically bound to it with a routing key which is the same as the queue name.
+            body=json.dumps(message),     # Serialize the 'message' dictionary to JSON and set it as the message body
+            properties=pika.BasicProperties(
+                delivery_mode=pika.spec.PERSISTENT_DELIVERY_MODE  # Set the delivery mode to make messages persistent
+
+            )
+        )
+    except: 
+        # If there is an exception during message publishing, delete the uploaded file and return an internal server error with a 500 status code, deleting makes sense as this file will never be picked if a message is not being put on the queue for it.
+        fs.delete(fid)
+        return "internal server error", 500
+
+    
+
+Understanding the flow once again for better clarity.
+
+How rabbitmq is going to be integrated with our overall architecture? 
+
+1. When a user uploads a video to be converted to mp3 that request will first hit our gateway, 
+our gateway will store the video in mongodb and then put a message on our rabbitmq queue letting downstream services know that there is a a video to be processed in mongodb
+
+The video to mp3 converter service will consume messages from the queue, it will then get the id of that video from the message  and it will pull that video from mongodb, convert it into mp3 and store that into mongodb 
+and then put a new message on to the queue to be consumed by the notification service that says the conversion job is done, the notification service consumes those messages from queue and send emails to clients that it is done and mp3 is ready to download
+
+The client then use the unique id acquired from the notification + his or her JWT to download the mp3 
+api gateway will pull the mp3 from mongodb and will serve it to the client
+
+------------------------------------------------------------------------------------------------------------------
+
+
+Understanding some key terms for microservice architectures.
+
+1.Asynchronous & Synchronous Interservice Communication                 
+
+
+Synchronous Interservice Communication: Blocking Request(once you send the request, you have to wait)
+client server sending the request awaits the response from the service that it is sending the request to, client service cant do anything while it awaits for the response, so it is BLOCKED
+
+for example our gateway service communincates with our auth service asynchronously so when the gateway service sends an HTTP POST request
+to our auth service to login a user retrieve a JWT for that user our gateway service is blocked either it gets JWT or an error
+
+
+
+Asynchronous: No blocking(using the queue)
+client server need not to await the response of downstream service
+
+this is achieved in our architecture using a queue!!!!!!!
+
+our gateway service needs to communicate to our converter service
+if it does that in a synchronous manner the performance of our gateway will take a hit because the gateway were to get many requests to convert large videos the process that make requests to the converter service will be blocked until the converter service finish processing the videos
+
+NOT SCALABLE!!!
+our gateway service is communicating asynchronously with our converter service
+it just sends the message to queue and forgets it 
+
+
+2. Strong and Eventual Consistency
+
+Strong consistency!! user gave the id and converted mp3 is available
+
+Eventual consistency!! you gave the id but it takes some time for mp3 to be available
+
+
+___________________________________________________________________________________
+
+Producer > Broker(exchange=> queue) > Consumer
+
+
+We will be using a default exchange for simplicity
+
+The DEFAULT EXCHANGE is a direct exchange with no name(empty string ) pre-declared by the broker. 
+It has one special property that makes it very useful for simple application: every queue that is created is automatically bound to it with a routing key which is the same as the queue name.
+
+
+Producer(gateway) -->RabbitMQ[broker(exhange=> queues(video)]) --> consumer(converter)
+
+
+Competing consumers pattern
+___________________________
+enables multiple concurrent users to process messages recieved on the same messaging channel resulting in more throughput
+
+by default our rabbitmq queue will dispatch messages to our consuming services using the round robin algorithm
+
+basically the messages will be distributed more or less evenly among our consumer
+
+
+
+__________________________________________________________________________________
+Dockerfile: sane as auth service just info about expose is changed a
+
+FROM python:3.10-slim-bullseye
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends --no-install-suggests \
+  build-essential \
+  && pip install --no-cache-dir --upgrade pip
+
+WORKDIR /app
+COPY ./requirements.txt /app
+RUN pip install --no-cache-dir --requirement /app/requirements.txt
+COPY . /app
+
+EXPOSE 8080
+
+CMD ["python3", "server.py"]
+
+
+docker build -t bhanumalhotra/gateway1:latest
+
+docker push bhanumalhotra/gateway
+
+____________________________________________________________________________________________
+
+gateway-deployment.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels:
+    app: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 3
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: bhanumalhotra/gateway1
+          envFrom:
+            - configMapRef:
+                name: gateway-configmap
+            - secretRef:
+                name: gateway-secret
+
+____________________________________________________________________________________________
+
+
+configmap.yml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-configmap
+data:
+  AUTH_SVC_ADDRESS: "auth:5000"                                  -----------------------------> in k8s service names resolves to the ip address of that service
+
+
+
+____________________________________________________________________________________________
+
+secret.yml
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gateway-secret
+stringData:
+  PLACEHOLDER: nothing
+type: Opaque
+
+___________________________________________________________________________________________
+
+service.yml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+spec:
+  selector:
+    app: gateway
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+
+
+using label selector
+
+Service groups all the instances(replicas) so that you don't have to keep ips of each pod 
+
+we just need to send request to svc and it takes care of balancing the traffic to all the pods 
+
+But as gateway is entrypoing we need ingress for it as clusterIP is good for internal communication
+
+____________________________________________________________________________________________
+
+
+
+Ingress consist of a load balancer which acts as entry point to the cluster,  it consist of some rules too.
+
+
+Rules tell which request goes where, forexample we state host as mp3converter.com and in backend service we choose our gateway service. 
+It can route traffic to clusterIPs within the cluster.
+
+We can add more rules, forexample we send anything coming on apple-orange.com to any other service.
+
+
+nginx is the default loadbalancer
+
+
+# This line specifies the API version of the Kubernetes resource.
+apiVersion: networking.k8s.io/v1
+
+# This line specifies the kind of resource, which is an Ingress in this case.
+kind: Ingress
+
+# Metadata section contains information about the Ingress resource.
+metadata:
+  # The name is a unique identifier for this Ingress resource.
+  name: gateway-ingress
+
+  # Annotations are optional key-value pairs that provide additional configuration or metadata.
+  annotations:
+    # This annotation configures the Nginx Ingress Controller to set the maximum allowed request body size to "0" (unlimited).
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+
+    # These annotations configure the Nginx Ingress Controller to set read and send timeouts for proxying requests.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+
+# The 'spec' section defines the desired state of the Ingress resource.
+spec:
+  # 'rules' specify the routing rules for incoming traffic.
+  rules:
+    # 'host' defines the hostname to match in incoming requests.
+    - host: mp3converter.com
+
+      # 'http' is a configuration block for HTTP traffic.
+      http:
+        # 'paths' define how to route requests based on the URL path.
+        paths:
+          # This rule matches requests with the path '/' and forwards them to a backend service.
+          - path: /
+            pathType: Prefix  # This means it matches any path that starts with '/'
+            backend:
+              service:
+                # 'name' specifies the name of the backend service to forward requests to.
+                name: gateway
+
+                # 'port' specifies the port number on the backend service to forward requests to.
+                port:
+                  number: 8080
+
+____________________________________________________________________________________________
+
+How k8s connects to mp3converter.com?
+
+
+/etc/hosts                     for windows i think you find the file somewhere in system32/drivers/etc/hosts not sure
+
+
+127.0.0.0 mp3converter.com        mapped mp3converter.com to localhost ------+------- minikube tunnel makes ingress available at localhost = mp3converter.com is connected to ingress
+
+
+minikube addons list
+
+minikube addons enable ingress
+
+
+  After the addon is enabled, please run "minikube tunnel" and your ingress resources would be available at "127.0.0.1"
+
+
+
+(venv) PS C:kubectl apply -f ./
+configmap/gateway-configmap unchanged
+deployment.apps/gateway created
+ingress.networking.k8s.io/gateway-ingress unchanged
+secret/gateway-secret configured
+service/gateway unchanged
+
+
+crashloop:   queue isn't ready yet     FAILED so we need to build the rabbitmq microservice now
+
+
+venv) PS C:\Users\LENOVO\microservicesk8s\python\src\gateway\manifests> kubectl scale deployment --replicas=0 gateway
+deployment.apps/gateway scaled
+
+____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+                                                                                                                                           RABBITMQ
+
+
+
+Now for rabbitmq we will create manifests for rabbitmq,  but remember for RABBITMQ we will create STATEFUL SET not Deployment.
+
+Because we want the queue to be persistent, i.e even if our pod crashes and comes back queue shouldn't be lost.
+
+
+Stateful set is similar to deployment i.e it handles containers with similar spec under its hood, but now each database container will have its own volume.
+Each pod has a persistent identifier that it maintains accross any rescheduling
+
+
+
+MASTER              SLAVE       SLAVE     SLAVE
+write               only read only read  only read
+&read          
+
+
+we want to bind physical storage outside of container that won't crash even if the pod crashes
+
+
+
+Stateful-set.yml
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+spec:
+  serviceName: "not-applicable"
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3-management
+          ports:
+            - name: http
+              protocol: TCP
+              containerPort: 15672
+            - name: amqp                            ---------------> advanced message queuing protocol
+              protocol: TCP
+              containerPort: 5672
+          envFrom:
+            - configMapRef:
+                name: rabbitmq-configmap
+            - secretRef:
+                name: rabbitmq-secret
+          volumeMounts:                                         -----------------------------> this is where stateful sets are different from deployments they have bind volumes which stores the data and helps in the case pod goes down(this is where queues and messages are saved)
+            - mountPath: "/var/lib/rabbitmq"
+              name: rabbitmq-volume
+      volumes:
+        - name: rabbitmq-volume
+          persistentVolumeClaim:
+            claimName: rabbitmq-pvc
+
+
+_________________________________________________________________________________
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rabbitmq-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard
+
+__________________________________________________________________________________
+
+
+service.yml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq  <------
+spec: 
+  type: ClusterIP
+  selector:
+    app: rabbitmq
+  ports:
+    - name: http          <----------this has to be accessible from outside(we need to create ingress for it)
+      protocol: TCP
+      port: 15672 
+      targetPort: 15672
+    - name: amqp
+      protocol: TCP
+      port: 5672
+      targetPort: 5672 
+
+
+_______________________________________________________________________________
+
+ingress.yml
+
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rabbitmq-ingress
+spec:
+  rules:
+    - host: rabbit.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rabbitmq      --------------> it is going to the rabbitmq service above it on the port 15672 which is for management console
+                port:
+                  number: 15672
+
+______________________________________________________________________________
+
+
+kubectl apply -f ./
+
+
+
+add entry for its ingress to /etc/hosts        rabbit.com
+
+
+
+
+minikube tunnel
+
+
+rabbitmanager .com
+
+u - guest 
+p - guest
+
+
+create a video queue and keep it persistent
+
+now you can even apply your gateway service again as it was breaking because there was no queue named video before which was mentioned in util.py code.
+
+____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+                                                                                                                                  CONVERTER
+
+
+consumer.py
+
+
+# Import necessary libraries
+import pika  # Library for interacting with RabbitMQ message broker
+import sys   # Library for system-related operations
+import os    # Library for operating system-related operations
+import time  # Library for time-related operations
+from pymongo import MongoClient  # Library for working with MongoDB
+import gridfs  # Library for MongoDB GridFS storage
+from convert import to_mp3  # Custom module for converting videos to MP3 format
+
+# Define the main function, which is the entry point of the program
+def main():
+    # Connect to the MongoDB server
+    client = MongoClient("host.minikube.internal", 27017)
+    
+    # Create a reference to the 'videos' database in MongoDB
+    db_videos = client.videos
+    
+    # Create a reference to the 'mp3s' database in MongoDB
+    dbs_mp3s = client.mp3s
+    
+    # Create GridFS instances for storing videos and MP3s in MongoDB
+    fs_videos = gridfs.GridFS(db_videos)
+    fs_mp3s = gridfs.GridFS(dbs_mp3s)
+
+    # Connect to the RabbitMQ message broker
+    connection = pika.BlockingConnection(
+        pika.ConnectionParameters(host="rabbitmq")  # Specify the hostname of the RabbitMQ service
+    )
+    
+    # Create a communication channel with RabbitMQ
+    channel = connection.channel()
+
+    # Define a callback function that will be called when a message is received from RabbitMQ
+    def callback(ch, method, properties, body):
+        # Call the 'to_mp3.start' function to convert the video message ('body') to MP3
+        err = to_mp3.start(body, fs_videos, fs_mp3s, ch)                               --------> calling start function in to_mp3 module
+        
+        # Check if there was an error during the conversion
+        if err:
+            # If there was an error, reject the message and request it to be redelivered
+            ch.basic_nack(delivery_tag=method.delivery_tag)
+        else:
+            # If the conversion was successful, acknowledge the message
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+
+    # Set up a consumer to listen to a specific queue (specified in environment variables)
+    channel.basic_consume(
+        queue=os.environ.get("VIDEO_QUEUE"),  # Get the name of the queue from environment variables
+        on_message_callback=callback  # Specify the callback function to be executed when a message is received
+    )
+
+    # Print a message indicating that the program is waiting for messages
+    print("Waiting for messages. To exit, press CTRL+C")
+
+    # Start consuming messages from RabbitMQ
+    channel.start_consuming()
+
+# Check if the script is being run directly
+if __name__ == "__main__":
+    try:
+        # Call the 'main' function when the script is executed
+        main()
+    except KeyboardInterrupt:
+        # Handle a keyboard interrupt (CTRL+C) gracefully
+        print("Interrupted")
+        try:
+            # Attempt to exit the program cleanly
+            sys.exit(0)
+        except SystemExit:
+            # If the exit fails, force an exit
+            os._exit(0)
+
+______________________________________________________________
+cd converter/convert vi to_mp3.py
+
+
+import pika  # Import the pika library for RabbitMQ communication
+import json  # Import the json library for JSON handling
+import tempfile  # Import the tempfile library for temporary file management
+import os  # Import the os library for operating system-related operations
+from bson.objectid import ObjectId  # Import ObjectId from bson for working with MongoDB object IDs
+import moviepy.editor  # Import moviepy.editor for video and audio processing
+
+def start(message, fs_videos, fs_mp3s, channel):
+    # Parse the incoming message as JSON
+    message = json.loads(message)
+
+    # Create a temporary named file to store video contents
+    tf = tempfile.NamedTemporaryFile()
+
+    # Get video contents from the 'fs_videos' GridFS instance based on the video's ObjectId
+    out = fs_videos.get(ObjectId(message["video_fid"]))
+
+    # Write the video contents to the temporary file
+    tf.write(out.read())
+
+    # Create an audio object from the temporary video file
+    audio = moviepy.editor.VideoFileClip(tf.name).audio
+
+    # Close and clean up the temporary file
+    tf.close()
+
+    # Define the path to save the audio as an MP3 file
+    tf_path = tempfile.gettempdir() + f"/{message['video_fid']}.mp3"
+
+    # Write the audio to an MP3 file
+    audio.write_audiofile(tf_path)
+
+    # Open the MP3 file in binary read mode
+    f = open(tf_path, "rb")
+
+    # Read the MP3 file's data
+    data = f.read()
+
+    # Store the MP3 data in the 'fs_mp3s' GridFS instance and get its ObjectId
+    fid = fs_mp3s.put(data)
+
+    # Close the MP3 file and remove it from the temporary directory
+    f.close()
+    os.remove(tf_path)
+
+    # Update the message with the ObjectId of the newly created MP3
+    message["mp3_fid"] = str(fid)
+
+    try:
+        # Publish the message to the specified RabbitMQ queue
+        channel.basic_publish(
+            exchange="",
+            routing_key=os.environ.get("MP3_QUEUE"),  # Get the queue name from environment variables
+            body=json.dumps(message),  # Convert the message to JSON format
+            properties=pika.BasicProperties(
+                delivery_mode=pika.spec.PERSISTENT_DELIVERY_MODE  # Set message persistence
+            ),
+        )
+    except Exception as err:
+        # If there's an error, delete the newly created MP3 from GridFS
+        fs_mp3s.delete(fid)
+        return "Failed to publish message"  # Return an error message if publishing fails
+
+
+_______________________________________________________________
+Dockerfile
+
+FROM python:3.10-slim-bullseye
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends --no-install-suggests \
+  build-essential ffmpeg \
+  && pip install --no-cache-dir --upgrade pip
+
+WORKDIR /app
+COPY ./requirements.txt /app
+RUN pip install --no-cache-dir --requirement /app/requirements.txt
+COPY . /app
+
+CMD ["python3", "consumer.py"]
+
+docker build -t bhanumalhotra/converter1:latest .
+
+docker push bhanumalhotra/converter1:latest
+____________________________________________________________________
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: converter
+  labels:
+    app: converter
+spec:
+  replicas: 4           -------------> keep a high number of replicas for better conversion rate
+  selector:
+    matchLabels:
+      app: converter
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 8
+  template:
+    metadata:
+      labels:
+        app: converter
+    spec:
+      containers:
+        - name: converter
+          image: bhanumalhotra/converter1
+          envFrom:
+            - configMapRef:
+                name: converter-configmap
+            - secretRef:
+                name: converter-secret
+
+____________________________________________________________________________
+secret.yml
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: converter-secret
+stringData:
+  PLACEHOLDER: "NONE"
+type: Opaque
+
+
+____________________________________________________________________________
+configmap.yml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: converter-configmap
+data:
+  MP3_QUEUE: "mp3"
+  VIDEO_QUEUE: "video"
+
+
+___________________________________________________________________________
+
+kubectl apply -f ./
+
+
+
+HP@bhanumalhotra MINGW64 ~/Desktop/microservices-k8s/src/converter (main)
+$ curl -X POST http://mp3converter.com/login -u bhanucorrect@gmail.com:devops                                                                                   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   193  100   193    0     0    401      0 --:--:-- --:--:-- --:--:--   403eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImJoYW51Y29ycmVjdEBnbWFpbC5jb20iLCJleHAiOjE2OTM5OTE3MTMsImlhdCI6MTY5MzkwNTMxMywiYWRtaW4iOnRydWV9.wnv51FPtUbWcyslRhbYmSLe51ayPwfYMgnmN7YWgBKI
+
+HP@bhanumalhotra MINGW64 ~/Desktop/microservices-k8s/src/converter (main)
+$ curl -X POST -F 'file=@./test.mkv' -H 'Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImJoYW51Y29ycmVjdEBnbWFpbC5jb20iLCJleHAiOjE2OTM5OTE3MTMsImlhdCI6MTY5MzkwNTMxMywiYWRtaW4iOnRydWV9.wnv51FPtUbWcyslRhbYmSLe51ayPwfYMgnmN7YWgBKI' http://mp3converter.com/upload
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 1218k  100    21  100 1217k     47  2775k --:--:-- --:--:-- --:--:-- 2793kinternal server error
+
+most probably gateway was hitting the old ip of rabbitmq, restarting gateway worked:
+
+scaled down all the deployments and checked the logs when we run the command
+
+kubectl scale deployment gateway --replicas=1
+
+
+
+
+
+
+HP@bhanumalhotra MINGW64 ~/Desktop/microservices-k8s/src/converter (main)
+$ curl -X POST -F 'file=@./test.mkv' -H 'Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImJoYW51Y29ycmVjdEBnbWFpbC5jb20iLCJleHAiOjE2OTM5OTE3MTMsImlhdCI6MTY5MzkwNTMxMywiYWRtaW4iOnRydWV9.wnv51FPtUbWcyslRhbYmSLe51ayPwfYMgnmN7YWgBKI' http://mp3converter.com/upload
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 1218k  100     8  100 1217k     32  4928k --:--:-- --:--:-- --:--:-- 4971ksuccess!
+
+
+
+
+________________________________________________________________________
+
+Let's check if we do have mp3 files in our mongodb?
+
+
+PS C:\Users\HP\Desktop\microservices-k8s> mongosh
+Current Mongosh Log ID: 64f6f661e955d391bd278179
+Connecting to:          mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+1.9.1
+Using MongoDB:          6.3.1
+Using Mongosh:          1.9.1
+
+For mongosh info see: https://docs.mongodb.com/mongodb-shell/
+
+------
+   The server generated these startup warnings when booting
+   2023-09-04T15:21:03.590+05:30: Access control is not enabled for the database. Read and write access to data and configuration is unrestricted
+------
+
+test> show databases;
+admin   40.00 KiB
+config  72.00 KiB
+local   84.00 KiB
+mp3s    25.36 MiB
+videos  32.25 MiB
+test> use mp3s
+switched to db mp3s
+mp3s> show collections;
+fs.chunks
+fs.files
+mp3s> db.fs.files.find()
+[
+
+  {
+    _id: ObjectId("64f37f0791a4b7f7628ec47e"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-02T18:29:27.359Z")
+  },
+  {
+    _id: ObjectId("64f37f66b11479050be6524c"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-02T18:31:02.952Z")
+  },
+  {
+    _id: ObjectId("64f37f6743af4ab461884a08"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-02T18:31:04.075Z")
+  },
+  {
+    _id: ObjectId("64f37f6c4f789794fb2de2f3"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-02T18:31:08.157Z")
+  },
+  {
+    _id: ObjectId("64f37f6e91a4b7f7628ec484"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-02T18:31:10.636Z")
+  },
+  {
+    _id: ObjectId("64f37f71b11479050be65252"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-02T18:31:13.464Z")
+  },
+  {
+    _id: ObjectId("64f37f7243af4ab461884a0e"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-02T18:31:14.148Z")
+  },
+  {
+    _id: ObjectId("64f37f724f789794fb2de2f9"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-02T18:31:14.576Z")
+  },
+  {
+    _id: ObjectId("64f3f4c8ed36e3394dcda11f"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-03T02:51:52.616Z")
+  },
+  {
+    _id: ObjectId("64f416add8634e9da33ff879"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-03T05:16:29.140Z")
+  },
+  {
+    _id: ObjectId("64f5de230e99135b8db75603"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-04T13:39:47.954Z")
+  },
+  {
+    _id: ObjectId("64f6f1bbcd6fde461486d576"),
+    chunkSize: 261120,
+    length: Long("1137937"),
+    uploadDate: ISODate("2023-09-05T09:15:39.485Z")
+  }
+]
+
+____________________________________________________________________________________
+
+Updating the server.py of gateway so as to have download route setup for us to download the convertered mp3s
+
+server.py
+
+# Import necessary libraries/modules
+import os              # Import the operating system module for various system-related functions
+import send_file                                                              -------------------------------------->    to send the user mp3 files
+import gridfs          # Import the GridFS module for storing and retrieving large files in MongoDB
+import pika            # Import the Pika module for interacting with RabbitMQ, a message broker
+import json            # Import the JSON module for working with JSON data
+from flask import Flask, request  # Import the Flask web framework and request object
+
+
+# Import custom modules 
+from auth import validate       # Import a function called 'validate' from a module named 'auth'      
+from auth_svc import access     # Import a function called 'access' from a module named 'auth_svc'
+from storage import util       # Import a module named 'util' from a package named 'storage'
+
+# Create a Flask web application instance
+server = Flask(__name__)
+
+# Configure the MongoDB URI (Uniform Resource Identifier) for the server's MongoDB connection
+mongo_video = PyMongo(
+    server,
+    uri="mongodb://host.minikube.internal:27107/videos"           
+)
+
+mongo_mp3 =PyMongo(
+    server,
+    uri="mongodb://host.minikube.internal:27017/mp3s"                                       -----------------------> creating multople PyMongo instances to connect to multiple databases(videodb and mp3db)
+)
+                                                        
+
+# Create a GridFS instance for working with files stored in MongoDB
+fs_videos = gridfs.GridFS(mongo_videos.db)
+fs_mp3  = gridfs.GridFS(mongo_mp3.db)                                                       -------------------------> need to create 2 gridfs instances now
+
+# Create a connection to the RabbitMQ message broker
+connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
+
+# Create a communication channel for sending and receiving messages in RabbitMQ
+channel = connection.channel()
+
+# Define a route for handling HTTP POST requests to "/login"
+@server.route("/login", methods=["POST"])
+def login():
+    # Call the 'login' function from the 'access' module with the 'request' object and store the result in 'token' and 'err' 
+    token, err = access.login(request)  # This line calls a function to handle user login and stores the result in 'token' and 'err'
+
+    if not err:
+        return token  # Return the 'token' as a response if there are no errors
+    else: 
+        return err  # Return the 'err' message as a response if there are errors
+
+@server.route("/upload", methods=["POST"])
+def upload():
+    access, err = validate.token(request)  # This line calls a function to validate a user token and stores the result in 'access' and 'err' 
+  
+    if err: 
+         return err
+
+    access = json.loads(access)  #converts jason to python. Now this access will have payload which also have admin is set to true or false.
+
+    if access["admin"]:                                                                
+        if len(request.files) > 1 or len(request.files) < 1:
+            return "exactly 1 file required", 400            #this request.file dictionary will have key for the file and file as a value.  _ is key and f is file
+            
+        for _, f in request.files.items():
+            err = util.upload(f, fs, channel, access) 
+
+            if err:
+                return err
+            
+            return "success!", 200
+        
+    else:
+        return "not authorized", 401
+
+@server.route("/download", methods=["GET"])
+def download():
+    access, err = validate.token(request)  # This line calls a function to validate a user token and stores the result in 'access' and 'err' 
+  
+    if err: 
+         return err
+
+    access = json.loads(access)  #converts jason to python. Now this access will have payload which also have admin is set to true or false.
+
+    if access["admin"]:                                                                
+         fid_string = request.args.get("fid")
+
+         if not fid_string:
+              return "fid is required", 400
+ 
+         try: 
+             out = fs_mp3s.get(ObjectId(fid_string))
+             return send_file(out, download_name=f'{fid_string}.mp3)
+         except Exception as err :
+             print(err)
+             return "internal server error", 500
+    return "not authorized", 401
+
+if __name__ == "__main__":
+            server.run(host="0.0.0.0", port=8080)
+
+build the image again
+docker build -t bhanumalhotra/gateway1:latest .
+docker push bhanumalhotra/gateway1:latest
+
+
+cd manfiests
+kubectl apply -f .
+
+_______________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+
+                                                                                                                             Notiification Service
+            
+
+
+Documentation to learn how to send email messages:
+
+https://docs.python.org/3/library/email.examples.html
+
+
+consumer.py
+
+import smtplib, os                                                  (we will use same smtp ) server to send ,receive between senders and receiver  
+from email.message import EmailMessage                               -------> no need to install it is part of python standard library
+
+def notification(message): 
+    try: 
+       message = json.loads(message)
+       mp3_fid = message["mp3_fid"]
+       sender_address = os.environ.get("GMAIL_ADDRESS")
+       sender_password = os.environ.get("GMAIL_PASSWORD ")
+       receiver_address= message["username"]
+      
+       message = EmailMessage()
+       msg.set_content(f"mp3 file_id: {mp3_fid} is now ready!")
+       msg["Subject"] = "MP3 Download"
+       msg[["To"] =  receiver_address
+
+       session = smtplib("smtp.gmail.com, 587") -----------> using gmail smtp server 
+       session.starttls()                                -------------------------------> making it secure using tls
+       session.login(sender_address, sender_password)
+       session.send_message(msg, sender_address)
+
+python -m venv venv
+
+pip install jedi pylint
+
+___________________________________________________________________________
+
+Dockerfile
+
+FROM python:3.10-slim-bullseye
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends --no-install-suggests \
+  build-essential \
+  && pip install --no-cache-dir --upgrade pip
+
+WORKDIR /app
+COPY ./requirements.txt /app
+RUN pip install --no-cache-dir --requirement /app/requirements.txt
+COPY . /app
+
+CMD ["python3", "consumer.py"]
+
+___________________________________________________________________________
+notification-deploy.yml
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification
+  labels:
+    app: notification
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: notification
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 8
+  template:
+    metadata:
+      labels:
+        app: notification
+    spec:
+      containers:
+        - name: notification
+          image: bhanumalhotra/notification1
+          envFrom:
+            - configMapRef:
+                name: notification-configmap
+            - secretRef:
+                name: notification-secret
+
+
+__________________________________________________________________________
+%s/converter/notification/g  ---------> this way we can make changes to our converter file to create notification file.
+_________________________________________________________________________
+secret.yml
+
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: notification-secret
+stringData:
+  GMAIL_ADDRESS: "bhanumalhotra121@gmail.com"
+  GMAIL_PASSWORD: ""               --------------------> this can be created in gmail settings by saying yes to multi factor authentication ---> create app passwords     
+type: Opaque
+
+_______________________________________________________________
+
+configMap.yml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-configmap
+data:
+  MP3_QUEUE: "mp3"
+  VIDEO_QUEUE: "video"
+
+_______________________________________________________________
+
+update email in mysql?
+
+UPDATE user SET email = 'arsharsh2391@gmail.com' WHERE id =1;
+
+
+
+want to add more users?
+
+mysql> INSERT INTO user (email, password)
+    -> VALUES ('arsharsh2391@gmail.com', 'devops');
+Query OK, 1 row affected (0.01 sec)
+
+mysql> SELECT * FROM user;
++----+------------------------+----------+
+| id | email                  | password |
++----+------------------------+----------+
+|  1 | bhanucorrect@gmail.com | devops   |
+|  2 | arsharsh2391@gmail.com | devops   |
++----+------------------------+----------+
+2 rows in set (0.00 sec)
+
+mysql>
+
+__________________________________________________________
+
+
+
+Downloading the mp3 file:
+
+
+HP@bhanumalhotra MINGW64 ~/Desktop/microservices-k8s/src/converter (main)
+$ curl -X POST -F 'file=@./test.mkv' -H 'Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImJoYW51Y29ycmVjdEBnbWFpbC5jb20iLCJleHAiOjE2OTQwMDY2ODcsImlhdCI6MTY5MzkyMDI4NywiYWRtaW4iOnRydWV9.Ir_VUxYBPYIxhnOTHZE0nu4w1phOR5D7EuhlNYUaYSU' http://mp3converter.com/upload
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 1218k  100    21  100 1217k    132  7696k --:--:-- --:--:-- --:--:-- 7758kinternal server error
+
+HP@bhanumalhotra MINGW64 ~/Desktop/microservices-k8s/src/converter (main)
+$ curl -X POST -F 'file=@./test.mkv' -H 'Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImJoYW51Y29ycmVjdEBnbWFpbC5jb20iLCJleHAiOjE2OTQwMDY2ODcsImlhdCI6MTY5MzkyMDI4NywiYWRtaW4iOnRydWV9.Ir_VUxYBPYIxhnOTHZE0nu4w1phOR5D7EuhlNYUaYSU' http://mp3converter.com/upload
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 1218k  100     8  100 1217k     58  8942k --:--:-- --:--:-- --:--:-- 9022ksuccess!
+
+HP@bhanumalhotra MINGW64 ~/Desktop/microservices-k8s/src/converter (main)
+$ curl --output abc.mp3 -X GET -H 'Authorization: Bearer  eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImJoYW51Y29ycmVjdEBnbWFpbC5jb20iLCJleHAiOjE2OTQwMDY2ODcsImlhdCI6MTY5MzkyMDI4NywiYWRtaW4iOnRydWV9.Ir_VUxYBPYIxhnOTHZE0nu4w1phOR5D7EuhlNYUaYSU' "http://mp3converter.com/download?fid=64f72cf3a67ec20c1ee18817"  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100    14  100    14    0     0    213      0 --:--:-- --:--:-- --:--:--   218
+
+HP@bhanumalhotra MINGW64 ~/Desktop/microservices-k8s/src/converter (main)
+$ ls
+Dockerfile  abc.mp3  consumer.py  convert/  manifests/  requirements.txt  test.mkv  venv/
