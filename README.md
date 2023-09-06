@@ -3,6 +3,8 @@
 
 (I have shared all my learnings from this project in file named lessons_learned.txt in this repository only.)
 
+This documentation outlines the workflow of our system, which handles user authentication, file uploads, conversion, and notifications. The process is divided into multiple services, each with its unique role.
+
 ![micro1](https://github.com/bhanumalhotra123/systemdesign-k8s/assets/144083659/c6492572-7bac-4464-a849-ddac44452d0e)
 
 
@@ -13,7 +15,7 @@
 
 
 
-This documentation outlines the workflow of our system, which handles user authentication, file uploads, conversion, and notifications. The process is divided into multiple services, each with its unique role.
+
 
 Steps:
 
