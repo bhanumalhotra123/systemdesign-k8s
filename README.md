@@ -6,6 +6,12 @@
 ![micro1](https://github.com/bhanumalhotra123/systemdesign-k8s/assets/144083659/c6492572-7bac-4464-a849-ddac44452d0e)
 
 
+![micro2](https://github.com/bhanumalhotra123/systemdesign-k8s/assets/144083659/4ccccfbc-820b-4025-8524-1aa782b140bf)
+
+
+![micro3](https://github.com/bhanumalhotra123/systemdesign-k8s/assets/144083659/3f80fdbb-8886-44ae-94c3-17cf40ff28de)
+
+
 
 This documentation outlines the workflow of our system, which handles user authentication, file uploads, conversion, and notifications. The process is divided into multiple services, each with its unique role.
 
