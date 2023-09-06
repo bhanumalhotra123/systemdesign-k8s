@@ -1,4 +1,7 @@
-**Project aim : To convert the video files to mp3 files uploaded by the user** 
+**Project: Microservices architecture and system design** 
+
+
+(I have shared all my learnings from this project in file named lessons_learned.txt in this repository only.)
 
 This documentation outlines the workflow of our system, which handles user authentication, file uploads, conversion, and notifications. The process is divided into multiple services, each with its unique role.
 
