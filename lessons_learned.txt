@@ -139,7 +139,7 @@ CREATE TABLE user (
 );
 
 -- Insert a new record into the 'user' table with specified email and password values
-INSERT INTO user (email, password) VALUES ('bhanumcorrect@gmail.com', 'interview');            ---------------------> this is the user that goes into our database and gets verified to get access to our api gateway
+INSERT INTO user (email, password) VALUES ('bhanucorrect@gmail.com', 'interview');            ---------------------> this is the user that goes into our database and gets verified to get access to our api gateway
 
 
 _________________________________________________________________________ 
