@@ -24,12 +24,12 @@ Steps:
 When a user enters the system, the Gateway Service checks if they have provided a valid username and password.
 If valid, the Gateway Service sends a request to the Authentication Service to verify the credentials against our MySQL database.
 Upon successful verification, a JWT token is generated and returned to the user.
-
+```
 
 $ curl -X POST http://mp3converter.com/login -u bhanucorrect@gmail.com:devops                                                                                   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
 100   193  100   193    0     0   9146      0 --:--:-- --:--:-- --:--:--  9650eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImJoYW51Y29ycmVjdEBnbWFpbC5jb20iLCJleHAiOjE2OTM5MjExNjMsImlhdCI6MTY5MzgzNDc2MywiYWRtaW4iOnRydWV9.woEtLjr1d6Nvh9pIu7Li3PAvY72XYcpOwv03XxBkaIs
-
+```
 
 2.File Upload and Authentication:
 
@@ -47,13 +47,13 @@ The Converter Service continuously consumes messages from the RabbitMQ queue, pr
 For each message, it queries MongoDB for the corresponding video file using the provided ID.
 The Converter Service converts the video file and stores the result in another MongoDB database, named 'mp3.'
 It then places a message on the queue, indicating the ID of the converted file.
-
+```
 $ curl -X POST -F 'file=@./test.mkv' -H 'Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImJoYW51Y29ycmVjdEBnbWFpbC5jb20iLCJleHAiOjE2OTM5MjExNjMsImlhdCI6MTY5MzgzNDc2MywiYWRtaW4iOnRydWV9.woEtLjr1d6Nvh9pIu7Li3PAvY72XYcpOwv03XxBkaIs' http://mp3converter.com/upload
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
 100 1218k  100     8  100 1217k     40  6142k --:--:-- --:--:-- --:--:-- 6182ksuccess!
 
-
+```
 
 Notification Service:
 
@@ -69,7 +69,7 @@ Upon successful authentication, the Gateway retrieves the file from MongoDB and 
 
 This workflow ensures secure user authentication, seamless file upload and conversion, timely notifications, and secure file retrieval. It's designed to provide a smooth user experience while maintaining data integrity and security at each step of the process.
 
-
+```
 HP@bhanumalhotra MINGW64 ~/Desktop/microservices-k8s/src/converter (main)
 $ curl --output abc.mp3 -X GET -H 'Authorization: Bearer  eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImJoYW51Y29ycmVjdEBnbWFpbC5jb20iLCJleHAiOjE2OTQwMDY2ODcsImlhdCI6MTY5MzkyMDI4NywiYWRtaW4iOnRydWV9.Ir_VUxYBPYIxhnOTHZE0nu4w1phOR5D7EuhlNYUaYSU' "http://mp3converter.com/download?fid=64f72cf3a67ec20c1ee18817"  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
@@ -78,3 +78,4 @@ $ curl --output abc.mp3 -X GET -H 'Authorization: Bearer  eyJ0eXAiOiJKV1QiLCJhbG
 HP@bhanumalhotra MINGW64 ~/Desktop/microservices-k8s/src/converter (main)
 $ ls
 Dockerfile  abc.mp3  consumer.py  convert/  manifests/  requirements.txt  test.mkv  venv/
+```
